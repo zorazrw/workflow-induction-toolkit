@@ -25,7 +25,7 @@ Find workflow step descriptions in `${DATA_DIR}/workflow.txt` and detailed data 
 
 ## ① Installation
 ```bash
-git clone ${REPO_URL}
+git clone https://github.com/zorazrw/workflow-induction-toolkit
 cd workflow-induction-toolkit
 export OPENAI_API_KEY=${YOUR_API_KEY}
 ```
@@ -73,3 +73,18 @@ where `--auto` is used to automatically iterate and terminate workflow induction
 
 The workflow will be saved in the `{data_dir}/workflow.json` as a JSON file.
 The high-level step description will be saved in the `{data_dir}/workflow.txt` as plain texts.
+
+## Acknowledgement
+
+Please cite our paper if you find this toolkit useful in your research:
+
+```bibtex
+@inproceedings{xxx2025wang,
+  title = {How AI Agents Do Human Work? Comparing AI and Human Workflows Across Diverse Occupations},
+  author = {Wang, Zora Zhiruo and Last, First},
+  journal={arXiv preprint arXiv:251x.xxxxx},
+  year = {2025},
+}
+```
+
+The recording tool is built upon [GUM](https://github.com/generalusermodels/gum).
