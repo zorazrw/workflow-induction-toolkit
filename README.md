@@ -8,7 +8,12 @@
 
 # Workflow Induction Toolkit
 
-We introduce a scalable toolkit to induce interpretable, structured workflows from either human or agent computer-use activities, usually consisting heterogeneous low-level actions.
+We induce interpretable, structured workflows from either human or agent computer-use activities, usually consisting heterogeneous low-level actions.
+Download apps for
+[![macOS](https://img.shields.io/badge/macOS-Download-A2AAAD?logo=apple&logoColor=white&style=flat)](https://drive.google.com/drive/folders/11AqZD9enkH8g9uCHK5NAd2Fxu0m36rfl?usp=sharing)
+and
+[![Windows](https://img.shields.io/badge/Windows-Download-457b9d?logo=windows&logoColor=white&style=flat)](https://drive.google.com/drive/folders/1tq5VLQuvmxJesg0Otj2Jq5iQbN5ZQSDY?usp=drive_link)
+to start!
 
 <div align="left">
   <a href="https://img.shields.io/badge/arXiv-251x.xxxxx-b31b1b.svg">
@@ -19,7 +24,7 @@ We introduce a scalable toolkit to induce interpretable, structured workflows fr
 ## Quick Start 🚀
 
 ```bash
-bash induce_workflow.sh ${DATA_DIR}  # "~/Downloads/records" by default
+bash induce_workflow.sh ${DATA_DIR}
 ```
 Find workflow step descriptions in `${DATA_DIR}/workflow.txt` and detailed data in `${DATA_DIR}/workflow.json`.
 
@@ -81,10 +86,10 @@ Please cite our paper if you find this toolkit useful in your research:
 ```bibtex
 @inproceedings{xxx2025wang,
   title = {How AI Agents Do Human Work? Comparing AI and Human Workflows Across Diverse Occupations},
-  author = {Wang, Zora Zhiruo and Last, First},
+  author = {Wang, Zora Zhiruo and Shao, Yijia and Shaikh, Omar and Fried, Daniel and Neubig, Graham and Yang, Diyi},
   journal={arXiv preprint arXiv:251x.xxxxx},
   year = {2025},
 }
 ```
 
-The recording tool is built upon [GUM](https://github.com/generalusermodels/gum).
+The recording tool is modified based on [GUM](https://github.com/generalusermodels/gum).
