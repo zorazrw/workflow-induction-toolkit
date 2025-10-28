@@ -16,8 +16,8 @@ and
 to start!
 
 <div align="left">
-  <a href="https://img.shields.io/badge/arXiv-251x.xxxxx-b31b1b.svg">
-    <img src="https://img.shields.io/badge/arXiv-251x.xxxxx-b31b1b.svg" alt="arXiv">
+  <a href="https://img.shields.io/badge/arXiv-2510.22780-b31b1b.svg">
+    <img src="https://img.shields.io/badge/arXiv-2510.22780-b31b1b.svg" alt="arXiv">
   </a>
 </div>
 
@@ -84,10 +84,10 @@ The high-level step description will be saved in the `{data_dir}/workflow.txt` a
 Please cite our paper if you find this toolkit useful in your research:
 
 ```bibtex
-@inproceedings{xxx2025wang,
+@inproceedings{howai2025wang,
   title = {How AI Agents Do Human Work? Comparing AI and Human Workflows Across Diverse Occupations},
   author = {Wang, Zora Zhiruo and Shao, Yijia and Shaikh, Omar and Fried, Daniel and Neubig, Graham and Yang, Diyi},
-  journal={arXiv preprint arXiv:251x.xxxxx},
+  journal={arXiv preprint arXiv:2510.22780},
   year = {2025},
 }
 ```
