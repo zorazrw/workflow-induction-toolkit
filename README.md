@@ -15,11 +15,7 @@ and
 [![Windows](https://img.shields.io/badge/Windows-Download-457b9d?logo=windows&logoColor=white&style=flat)](https://drive.google.com/drive/folders/1tq5VLQuvmxJesg0Otj2Jq5iQbN5ZQSDY?usp=drive_link)
 to start!
 
-<div align="left">
-  <a href="https://arxiv.org/abs/2510.22780">
-    <img src="https://img.shields.io/badge/arXiv-2510.22780-b31b1b.svg" alt="arXiv">
-  </a>
-</div>
+Read our paper: "*How AI Agents Do Human Work? Comparing AI and Human Workflows Across Diverse Occupations*" [:link:](https://arxiv.org/abs/2510.22780)
 
 ## Quick Start 🚀
 
