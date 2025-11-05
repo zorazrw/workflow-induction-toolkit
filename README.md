@@ -61,6 +61,8 @@ python get_human_trajectory.py --data_dir <data_dir>
 ```
 where `data_dir` should be directory containing the `records`, e.g., `~/Downloads/` by default.
 
+You can also preprocess agent trajectories into a similar format, `get_agent_trajectory.py` provides an example for OpenHands agents (run `python get_agent_trajectory.py --data_dir <data_dir>`).
+
 Then, segment the trajectory based on state transitions:
 ```bash
 python segment.py --data_dir <data_dir>
