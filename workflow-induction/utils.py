@@ -1,4 +1,3 @@
-import time
 import base64
 
 def encode_image(img_path: str, return_url: bool = False) -> str:
@@ -53,10 +52,9 @@ def compose_key_input(input_list: list[str]) -> str:
 
 # %% LLM
 import os
-import openai
 from openai import OpenAI
 
-def call_openai(prompt: str, content = None, model_name: str = "gpt-4o") -> str:
+def call_llm(prompt: str, content = None, model_name: str = "gpt-4o") -> str:
 	client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 	try:
 		response = client.chat.completions.create(

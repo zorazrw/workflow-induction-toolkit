@@ -6,7 +6,7 @@
 import os
 import json
 import argparse
-from utils import encode_image, call_openai
+from utils import encode_image, call_llm
 from language import ActionNode, SequenceNode, get_last_action
 
 PROMPT_GOAL = "Your task is to determine if the action sequence aligns with the task goal. The actions may not have achieved the goal yet, return 'YES' as long as it attempts to progress towards the goal. If no action sequence is provided, return 'YES'."
@@ -57,7 +57,7 @@ def eval_goal(
         indices_to_remove = [i for i in state_indices if i % rate != 0]
         content = [c for i,c in enumerate(content) if i not in indices_to_remove]
 
-    text = call_openai(prompt=prompt, content=content)
+    text = call_llm(prompt=prompt, content=content)
     if verbose: print(text)
     return "YES" in text, text
 
@@ -85,7 +85,7 @@ def eval_step_goal(
         content.append({"type": "text", "text": "Previous Steps: " + "\n".join(prev_goals)})
     if next_goals is not None:
         content.append({"type": "text", "text": "Next Steps: " + "\n".join(next_goals)})
-    text = call_openai(prompt=prompt, content=content)
+    text = call_llm(prompt=prompt, content=content)
     if verbose: print(text)
     return "YES" in text, text
 
