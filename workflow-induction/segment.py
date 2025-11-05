@@ -7,10 +7,10 @@ import os
 import cv2
 import argparse
 import numpy as np
-from utils import encode_image, call_openai
+from utils import encode_image, call_llm
 from language import (
     ActionNode, SequenceNode, get_new_node, merge_nodes, 
-    get_first_action, get_last_action, viz_node,
+    get_first_action, get_last_action, viz_node, annotate_high_level_nodes
 )
 
 # %% State Similarity
@@ -45,7 +45,7 @@ def neural(image1: str | None, image2: str | None) -> float:
         {"type": "image_url", "image_url": {"url": image1_url},},
         {"type": "image_url", "image_url": {"url": image2_url},}
     ]
-    response = call_openai(PROMPT, content)
+    response = call_llm(PROMPT, content)
     return 0.0 if "YES" in response else 1.0
 
 
@@ -167,7 +167,7 @@ def get_intervals(
         intervals.append((0, s-1))
     if verbose:
         print(f"Found {len(ranges)} ranges: ", ranges)
-        # cont = input("Continue? (Y/n)")
+        cont = input("Continue? (Y/n)")
 
     # add the rest of the ranges
     i, L = 0, len(ranges)
@@ -181,12 +181,12 @@ def get_intervals(
             intervals.append(gap)
             if verbose:
                 print(f"Added range {curr_range} and gap {gap} (step_diff: {step_diff})")
-                # cont = input("Continue? (Y/n)")
+                cont = input("Continue? (Y/n)")
         else:  # merge as one range
             intervals.append((curr_range[0], gap[1]))
             if verbose:
                 print(f"Added merged range {intervals[-1]} (curr_range: {curr_range}) (gap: {gap}) (step_diff: {step_diff})")
-                # cont = input("Continue? (Y/n)")
+                cont = input("Continue? (Y/n)")
         i += 1
     
     # after the loop
@@ -242,20 +242,6 @@ def segment_by_ranges(
     ]
     return segments
 
-
-def get_ipython_segments_0(nodes: list[ActionNode]) -> list[ActionNode | SequenceNode]:
-    """Get the ipython segments from the nodes."""
-    ipython_segments = []
-    curr_segment = []
-    for node in nodes:
-        assert isinstance(node, ActionNode)
-        if ("run_ipython" in node.action) and (len(curr_segment) > 0):
-            ipython_segments.append(get_new_node(curr_segment))
-            curr_segment = []
-        curr_segment.append(node)
-    if len(curr_segment) > 0:
-        ipython_segments.append(get_new_node(curr_segment))
-    return ipython_segments
 
 def get_ipython_segments(nodes: list[ActionNode]) -> list[ActionNode | SequenceNode]:
     """Get the ipython segments from the nodes."""
@@ -342,7 +328,7 @@ def split_sequence_node(node: SequenceNode) -> list[ActionNode | SequenceNode]:
         return node.nodes
     if len(subgoals) > 20:
         return [node]
-    response = call_openai(
+    response = call_llm(
         prompt="Is the goal a simple composition of subgoals? Only output 'YES' or 'NO'.",
         content=f"Goal: {node.goal}\n\nSubgoals:\n" + "\n".join(subgoals)
     )
@@ -354,33 +340,30 @@ def split_sequence_node(node: SequenceNode) -> list[ActionNode | SequenceNode]:
         print(f"Not splitting sequence node {node.goal} into {len(node.nodes)} nodes:", subgoals)
         # cont = input("Continue? (y/N)")
         return [node]
-    if cont.strip().lower() == "y":
-        return node.nodes
-    else:
-        return [node]
+    # if cont.strip().lower() == "y":
+    #     return node.nodes
+    # else:
+    #     return [node]
 
 
 # %% Main
 
 def main():
-    # measure state diffs
+    # 0. measure state diffs
     root_node = measure_state_diffs(args.trajectory_path, args.verbose)
-    # segment the trajectory
+    # 1. segment the trajectory
     if args.default_segment:
         segments = segment_per_step(root_node, args.threshold, args.verbose)
     else:
         segments = segment_by_ranges(root_node, args.threshold, min_steps=args.min_steps, verbose=args.verbose)
-
     segments = segment_at_ipython(segments, args.verbose)
     if len(segments) == 0: segments = [root_node]
-   
-    # semantically re-merge the segments if specified (based on semantic adjacent state similarity)
+    # 2. semantically re-merge the segments, if specified
     if args.do_remerge:  # list[ActionNode | SequenceNode]
         segments = remerge_segments_iterative(segments, args.remerge_threshold, args.verbose)
-
     segments = segments[1:]
     print(f"Found {len(segments)} segments: ", [s.get_num_actions() for s in segments])  # each segment is a ActionNode or list[ActionNode]
-    # cont = input("Continue? (Y/n)")
+
     # segment sequence nodes with compositional goals (based on LLM-annotated goals)
     def process_and_save_node(node: ActionNode | SequenceNode, i: int, save: bool = True) -> tuple[list[ActionNode | SequenceNode], int]:
         if isinstance(node, ActionNode):
@@ -391,7 +374,7 @@ def main():
                 node.to_json(node_path)
             return [node], i+1
         elif isinstance(node, SequenceNode):
-            node.annotate(model_name="gpt-4o", verbose=args.verbose)
+            node = annotate_high_level_nodes(node, verbose=args.verbose)
             split_nodes = split_sequence_node(node)
             for n in split_nodes:
                 print(f"[{n.node_type.value}] Goal: {n.goal}")
@@ -400,7 +383,6 @@ def main():
                     n.to_json(node_path)
                 i += 1
             return split_nodes, i
-
 
     node_list = []
     for node in segments[: 2]:
@@ -411,6 +393,8 @@ def main():
         if node1.node_type.value == "action":
             if node2.node_type.value == "action":
                 node = get_new_node([node1, node2])
+                node.get_goal()
+                node.get_status()
                 return [node]
             else:
                 node2.nodes = [node1] + node2.nodes
@@ -431,8 +415,11 @@ def main():
     i += 1
     print("Resume node processing from index", i)
     for node in segments[2:]:
-        nodes, i = process_and_save_node(node, i, save=True)
-        node_list.extend(nodes)
+        try:
+            nodes, i = process_and_save_node(node, i, save=True)
+            node_list.extend(nodes)
+        except Exception as e:
+            print(f"Error processing node {node}: {e}")
 
     # examine the segments
     if args.verbose:
@@ -454,7 +441,7 @@ if __name__ == "__main__":
     # mse
     parser.add_argument("--threshold", type=float, default=8000.0, 
                         help="State MSE difference threshold for segmentation.")
-    parser.add_argument("--min_steps", type=int, default=5, help="Minimum number of steps for a segment.")
+    parser.add_argument("--min_steps", type=int, default=1, help="Minimum number of steps for a segment.")
     parser.add_argument("--default_segment", action="store_true", 
                         help="If use default segmentation method: split at high-diff steps; otherwise, identify low-diff ranges.")
 

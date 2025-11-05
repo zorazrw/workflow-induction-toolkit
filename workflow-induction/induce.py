@@ -1,7 +1,7 @@
 import os
 import json
 import argparse
-from utils import call_openai
+from utils import call_llm
 from language import ActionNode, SequenceNode
 
 
@@ -19,6 +19,7 @@ def get_node_list(data_dir: str) -> list[ActionNode | SequenceNode]:
             node_list.append(SequenceNode.from_json(data=np_data))
         else:
             raise ValueError(f"Unknown node type: {np_data['node_type']}")
+
     return node_list
 
 def get_step_goals(node_list: list[ActionNode | SequenceNode]) -> str:
@@ -35,7 +36,7 @@ def get_step_goals(node_list: list[ActionNode | SequenceNode]) -> str:
 
 # %% Induce and Parse Workflow
 
-def get_workflow(text: str, verbose: bool = True) -> list[str]:
+def get_workflow(text: str, highlevel: bool = False, verbose: bool = True) -> list[str]:
     """Induce the workflow from the step goals, by adopting or merging the steps.
     Args:
         text: The step goals.
@@ -43,8 +44,8 @@ def get_workflow(text: str, verbose: bool = True) -> list[str]:
     Returns:
         The workflow steps.
     """
-    prompt = open(os.path.join(args.prompt_dir, "induce.txt")).read()
-    workflow = call_openai(prompt=prompt, content=text)
+    prompt = open(os.path.join(args.prompt_dir, "induce_highlevel.txt" if highlevel else "induce.txt")).read()
+    workflow = call_llm(prompt=prompt, content=text)
     workflow = workflow.strip('```').strip('\n').strip()
     if verbose: print(workflow)
     workflow_steps = workflow.split('\n')
@@ -74,14 +75,12 @@ def parse_workflow(workflow_steps: list[str], node_list: list[ActionNode | Seque
         s, e = wdict["index"]  # inclusive at both ends
         if s == e: # a single action/sequence node
             w_node = node_list[s]
-            if w_node.node_type.value == "sequence":
+            if w_node.node_type.value == "sequence" and w_node.status.value == "unknown":
                 w_node.get_status()
         else: # sequence node
             w_node = SequenceNode(nodes=node_list[s:e+1])
             w_node.goal = wdict["goal"]
             w_node.get_status()
-        if w_node.status.value == "failure":
-            w_node.goal = w_node.goal
         workflow_root.nodes.append(w_node)
         if verbose:
             print(f"{w_node.node_type} | {w_node.goal} | {w_node.status}")
@@ -91,7 +90,7 @@ def parse_workflow(workflow_steps: list[str], node_list: list[ActionNode | Seque
 
 # %% Main
 
-def one_pass(input_dir: str, output_dir: str):
+def one_pass(input_dir: str, output_dir: str, highlevel: bool = False):
     input_dir = os.path.join(args.data_dir, input_dir)
     output_dir = os.path.join(args.data_dir, output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -100,12 +99,7 @@ def one_pass(input_dir: str, output_dir: str):
     step_goals = get_step_goals(node_list)
     if args.verbose: print("Original step goals:\n", step_goals)
 
-    workflow_steps = get_workflow(step_goals)
-
-    # save workflow plain text
-    output_path = os.path.join(output_dir, f"workflow.txt")
-    with open(output_path, 'w') as fw:
-        fw.write('\n'.join(workflow_steps))
+    workflow_steps = get_workflow(step_goals, highlevel)
 
     # save workflow json
     workflow_root = None
@@ -128,6 +122,12 @@ def one_pass(input_dir: str, output_dir: str):
         print(f"Outputting the final workflow to {output_path} ...")
         workflow_root.to_json(output_path)
     
+        # save workflow plain text
+        output_path = os.path.join(args.data_dir, f"workflow.txt")
+        with open(output_path, 'w') as fw:
+            for node in workflow_root.nodes:
+                fw.write(f"{node.goal} | Status: {node.status.value}\n")
+
     return workflow_root
     
 
@@ -150,7 +150,7 @@ def auto_iterate():
     close_enough = False
     i_iter, max_iter = 0, 5
     while i_iter < max_iter:
-        curr_root = one_pass(args.input_dir, args.output_dir)
+        curr_root = one_pass(args.input_dir, args.output_dir, highlevel=(i_iter > -1))
         close_enough = is_close_enough(last_root, curr_root)
         if close_enough: break
         last_root = curr_root

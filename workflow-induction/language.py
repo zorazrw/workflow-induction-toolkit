@@ -1,10 +1,6 @@
-import os
 import enum
 import json
-from utils import is_keyboard_action, encode_image, call_openai
-
-from openai import OpenAI
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+from utils import encode_image, call_llm
 
 
 MAX_DIFF = 100000.0
@@ -100,12 +96,12 @@ class ActionNode:
     def get_num_actions(self):
         return 1
 
-    def get_goal(self, model_name: str = None):
+    def get_goal(self):
         """Verbalize the `goal` of the `action`."""
-        content = get_action_content(self, add_state=False)
+        content = self.get_llm_input(add_state=False)
         prompt = "Your task is to summarize the goal in a short sentence, given the action and the state." + \
             "Do not include prefix like 'the goal is'. Do not include action-specific details like the coordinates."
-        goal = call_openai(prompt=prompt, content=content)
+        goal = call_llm(prompt=prompt, content=content)
         self.goal = goal
     
     @classmethod
@@ -134,6 +130,21 @@ class ActionNode:
             json.dump(data, open(path, 'w'))
         return data
 
+    def get_llm_input(self, add_state: bool = False) -> list[dict]:
+        """Get the content in llm input format."""
+        content = []
+        text = self.action
+        if self.goal is not None: text += f" ({self.goal})"
+        content.append({"type": "text", "text": text})
+
+        if add_state:
+            image_path = self.state.get_state()
+            if image_path is not None:
+                image_url = encode_image(image_path, return_url=True)
+                content.append({"type": "image_url", "image_url": {"url": image_url}})
+        return content
+
+
 # %% Sequence Node
 
 class SequenceStatus(enum.Enum):
@@ -148,21 +159,24 @@ class SequenceNode:
         nodes: list, 
         goal: str = None, 
         status: SequenceStatus = None,
+        status_reason: str = None,
     ):
         self.node_type = NodeType.SEQUENCE
         self.nodes = nodes
         self.length = len(self.nodes)
 
         self.goal = goal
+        self.status_reason = status_reason
         if status is None:
             self.status = SequenceStatus.UNKNOWN
         else:
             for v in SequenceStatus:
                 if v.value == status:
                     self.status = v
+                    break
             else:
                 self.status = SequenceStatus.UNKNOWN
-    
+
     def __str__(self):
         return f"SequenceNode(goal={self.goal}, nnodes={len(self.nodes)}, status={self.status})"
     
@@ -177,60 +191,30 @@ class SequenceNode:
         for n in self.nodes:
             num_actions += n.get_num_actions()
         return num_actions
-
-    def annotate(
-        self,
-        prompt_path: str = "prompts/annotate_node.txt",
-        model_name: str = "litellm/neulab/claude-3-5-sonnet-20241022",
-        bucket_size: int = 20,
-        verbose: bool = True,
+ 
+    def get_goal(
+        self, 
+        prompt_path: str = "prompts/get_node_goal.txt",
     ):
-        """Group adjacent `nodes` into a `SequenceNode`."""
-        total_nodes = len(self.nodes)
-        num_buckets = (total_nodes + bucket_size - 1) // bucket_size
-        if verbose: print(f"Total nodes: {total_nodes} | Num buckets: {num_buckets}")
-
-        prompt = open(prompt_path).read()
-
-        new_nodes = []
-        for i in range(num_buckets):
-            print(f"Bucket {i}...")
-            nodes = self.nodes[i*bucket_size:(i+1)*bucket_size]
-            content = get_nodes_content(nodes, add_state=True)
-            response = call_openai(prompt=prompt, content=content)
-            chunks = parse_annotation(response, nodes)
-            while chunks is None:
-                print("Failed to parse annotation. Please try again.")
-                response = call_openai(prompt=prompt, content=content)
-                chunks = parse_annotation(response, nodes)
-            # print("Chunks: ", chunks)
-            chunks = validate_chunks(chunks, nodes)
-            
-            for c in chunks:
-                new_node = get_new_node(nodes[c["start"]:c["end"]+1])
-                new_node.goal = c["goal"]
-                new_nodes.append(new_node)
-            if verbose: print(f"Bucket {i} done: {len(new_nodes)} new nodes..")
-
-        self.nodes = new_nodes
-
-        # update the goal and status
-        self.get_goal(model_name=model_name)
-        self.get_status(model_name=model_name)
-    
-    def get_goal(self, prompt_path: str = "prompts/get_node_goal.txt", model_name: str = "litellm/neulab/claude-3-5-sonnet-20241022"):
         """Summarize the `goal` from the `nodes`."""
         subgoals = [f"[{i}] {n.get_semantic_repr()}" for i, n in enumerate(self.nodes)]
         content = [{"type": "text", "text": '\n'.join(subgoals)}]
         prompt = open(prompt_path).read()
-        goal = call_openai(prompt=prompt, content=content)
+        goal = call_llm(prompt=prompt, content=content)
         self.goal = goal
     
-    def get_status(self, prompt_path: str = "prompts/get_node_status.txt", model_name: str = "litellm/neulab/claude-3-5-sonnet-20241022"):
+    def get_status(
+        self,
+        prompt_path: str = "prompts/get_node_status.txt",
+    ):
         """Get the success/failure status of the `nodes` in achieving the `goal`."""
-        prompt = open(prompt_path).read()
-        content = get_nodes_content(self.nodes, add_state=True)
-        response = call_openai(prompt=prompt, content=content)
+        prompt = open(prompt_path).read() + "\n\nGoal: " + self.goal
+        print("Status Prompt: ", prompt)
+        content = get_nodes_content_for_status(self.nodes, add_state=True)
+        response = call_llm(prompt=prompt, content=content)
+        self.status_reason = response
+        # print("Status Response: ", response)
+        # cont = input("Is the response correct? (y/N)")
         self.status = SequenceStatus.SUCCESS if "YES" in response else SequenceStatus.FAILURE
     
     @classmethod
@@ -247,7 +231,12 @@ class SequenceNode:
                 nodes.append(ActionNode.from_json(data=node))
             elif node["node_type"] == NodeType.SEQUENCE.value:
                 nodes.append(cls.from_json(data=node))
-        return cls(nodes=nodes, goal=data.get("goal", None), status=data.get("status", None))
+        return cls(
+            nodes=nodes,
+            goal=data.get("goal", None),
+            status=data.get("status", None),
+            status_reason=data.get("status_reason", None)
+        )
 
     def to_json(self, path: str = None):
         """Save the sequence node to a JSON file.
@@ -258,11 +247,37 @@ class SequenceNode:
             "node_type": self.node_type.value,
             "nodes": [node.to_json() for node in self.nodes],
             "goal": self.goal,
-            "status": self.status.value
+            "status": self.status.value,
+            "status_reason": self.status_reason,
         }
         if path is not None:
             json.dump(data, open(path, 'w'))
         return data
+
+
+def get_nodes_content_for_status(
+    node_list: list[ActionNode | SequenceNode], 
+    add_state: bool = True,
+) -> str:
+    """Get the content of the sequence as text for status classification."""
+    content = []
+    for n in node_list:
+        if isinstance(n, ActionNode): text = n.action
+        else: text = n.get_semantic_repr() + f' (status: {n.status.value})'
+        content.append({"type": "text", "text": text})
+        print("[TEXT]", text)
+
+        if add_state:
+            if isinstance(n, ActionNode): sn = n
+            else: sn = get_last_action(n)
+            image_path = sn.state.get_state()
+            if image_path is not None:
+                print("[STATE IMAGE]", image_path)
+                image_url = encode_image(image_path, return_url=True)
+                content.append({"type": "image_url", "image_url": {"url": image_url}})
+    return content
+
+
 
 # %% Utility functions
 
@@ -272,19 +287,12 @@ def get_new_node(action_node_list: list[ActionNode]) -> ActionNode | SequenceNod
         return action_node_list[0]
     else:
         assert len(action_node_list) > 1, f"Length is {len(action_node_list)}"
-        return SequenceNode(nodes=action_node_list)
-
-def merge_nodes(node_list: list[ActionNode | SequenceNode]) -> SequenceNode:
-    merged_nodes = []
-    for i, node in enumerate(node_list):
-        if isinstance(node, ActionNode):
-            merged_nodes.append(node)
-        elif isinstance(node, SequenceNode):
-            merged_nodes.extend(node.nodes)
-    return SequenceNode(nodes=merged_nodes)
-
+        node = SequenceNode(nodes=action_node_list)
+        return node
 
 # %% Annotate Sequence Node
+
+# split into sub-nodes
 def parse_chunk(chunk: str) -> dict:
 	"""Parse chunk info dict from string."""
 	s = chunk.index('[')
@@ -298,8 +306,9 @@ def parse_chunk(chunk: str) -> dict:
 	s, e = int(s.strip()), int(e.strip())
 	return {"start": s, "end": e, "length": e - s + 1, "goal": text}
 
-def parse_annotation(annotation: str, node_list: list[ActionNode]) -> list[ActionNode | SequenceNode]:
-    print("Annotation: ", annotation)
+def parse_annotation(annotation: str, verbose: bool = False) -> list[dict]:
+    """Parse the sub-node info (start, end, length, goal) from the LLM response."""
+    if verbose: print("Annotation: ", annotation)
     index = annotation.find('[')
     chunks = [s.strip() for s in annotation[index:].split('\n') if s.strip()]
     chunks = [c for c in chunks if c.startswith('[')]
@@ -313,7 +322,7 @@ def parse_annotation(annotation: str, node_list: list[ActionNode]) -> list[Actio
     return parsed_chunks
 
 
-# %% Validate Chunks
+# Validate Chunks
 
 def remove_empty_chunks(chunks: list[dict], node_list: list[ActionNode]) -> list[dict]:
     """Remove chunks with no steps."""
@@ -350,41 +359,70 @@ def validate_chunks(chunks: list[dict], node_list: list[ActionNode]) -> list[dic
 
 # %% Input Node to LLM
 
-def get_action_content(action_node: ActionNode, add_state: bool = False) -> list[dict]:
-	"""Get the content of the step."""
-	content = []
-	if add_state:
-		if is_keyboard_action(action_node.action):
-			image_path = action_node.state.get_state()
-			if image_path is not None:
-				image_url = encode_image(image_path, return_url=True)
-				content.append({"type": "image_url", "image_url": {"url": image_url}})
-		else:
-			image_path = action_node.state.get_state()
-			if image_path is not None:
-				image_url = encode_image(image_path, return_url=True)
-				content.append({"type": "image_url", "image_url": {"url": image_url}})
-	
-	text = action_node.action
-	if action_node.goal is not None:
-		text += f" ({action_node.goal})"
-	content.append({"type": "text", "text": text})
-	return content
+def get_content_for_action_node_sequence(
+    node_list: list[ActionNode],
+    add_state: bool = True,
+) -> str:
+    """Get the content of the sequence as text for goal summarization."""
+    content = []
+    for i, n in enumerate(node_list):
+        assert isinstance(n, ActionNode)
+        n_content = n.get_llm_input(add_state=i==len(node_list)-1 and add_state)
+        content.extend(n_content)
+    return content
 
-def get_nodes_content(node_list: list[ActionNode | SequenceNode], add_state: bool = False) -> list[dict]:
-	"""Get the content of the sequence. Only add state for the last action, if set up."""
-	content = []
-	for n in node_list[:-1]:
-		if isinstance(n, ActionNode):
-			content.extend(get_action_content(n, add_state=False))
-		else:
-			content.extend(get_nodes_content(n.nodes, add_state=False))
-	
-	if isinstance(node_list[-1], ActionNode):
-		content.extend(get_action_content(node_list[-1], add_state=add_state))
-	else:
-		content.extend(get_nodes_content(node_list[-1].nodes, add_state=add_state))
-	return content
+
+def annotate_high_level_nodes(
+    node: SequenceNode,
+    prompt_path: str = "prompts/annotate_node.txt",
+    bucket_size: int = 10,
+    verbose: bool = True,
+):
+    """Annotated the highest-level `SequenceNode`."""
+    prompt = open(prompt_path).read()
+
+    # split into buckets
+    total_nodes = len(node.nodes)
+    num_buckets = (total_nodes + bucket_size - 1) // bucket_size
+    if verbose: print(f"Total nodes: {total_nodes} | Num buckets: {num_buckets}")
+
+    # split nodes inside each bucket
+    new_nodes = []
+    for i in range(num_buckets):
+        nodes = node.nodes[i*bucket_size:(i+1)*bucket_size]
+        print(f"Bucket {i} with {len(nodes)} nodes...")
+        content = get_content_for_action_node_sequence(nodes, add_state=True)
+        response = call_llm(prompt=prompt, content=content)
+        chunks = parse_annotation(response, nodes)
+        while chunks is None:
+            print("Failed to parse annotation. Please try again.")
+            response = call_llm(prompt=prompt, content=content)
+            chunks = parse_annotation(response, nodes)
+        chunks = validate_chunks(chunks, nodes)
+        print("Validated Chunks: ", chunks)
+        
+        for c in chunks:
+            new_node = get_new_node(nodes[c["start"]:c["end"]+1])
+            new_node.goal = c["goal"]
+            if new_node.node_type == NodeType.SEQUENCE:
+                new_node.get_status()
+            print("New Node | Goal: ", new_node.goal, " |  Status: ", new_node.status)
+            new_nodes.append(new_node)
+        if verbose: print(f"Bucket {i} done: {len(new_nodes)} new nodes..")
+
+    if len(new_nodes) == 1:
+        node = new_nodes[0]
+        print("Replace Original Node: Goal: ", node.goal, " |  Status: ", node.status)
+    else:
+        node.nodes = new_nodes
+        print(f"Expanding to {len(node.nodes)} new child nodes.")
+
+        # update the goal and status
+        node.get_goal()
+        node.get_status()
+        print("High-Level Node: Goal: ", node.goal, " |  Status: ", node.status)
+
+    return node
 
 
 # %% Get First/Last Action
@@ -403,6 +441,17 @@ def get_last_action(node: ActionNode | SequenceNode) -> ActionNode:
 
 
 
+def merge_nodes(node_list: list[ActionNode | SequenceNode]) -> SequenceNode:
+    merged_nodes = []
+    for i, node in enumerate(node_list):
+        if isinstance(node, ActionNode):
+            merged_nodes.append(node)
+        elif isinstance(node, SequenceNode):
+            merged_nodes.extend(node.nodes)
+    return SequenceNode(nodes=merged_nodes)
+
+
+
 def viz_node(node, indent_level: int = 0):
     content = f"[{indent_level}]" + " " * indent_level + "Type: " + node.node_type.value + " | "
     if isinstance(node, ActionNode) and node.action is not None:
@@ -413,6 +462,7 @@ def viz_node(node, indent_level: int = 0):
         content += "Goal: " + node.goal.split("\n")[0]
     else:
         content += "Goal: None"
+    content += " | Status: " + node.status.value
     print(content)
     if node.node_type == NodeType.SEQUENCE:
         for child in node.nodes:
