@@ -142,6 +142,8 @@ class ActionNode:
             if image_path is not None:
                 image_url = encode_image(image_path, return_url=True)
                 content.append({"type": "image_url", "image_url": {"url": image_url}})
+        # print("Action Content: ", content)
+        # cont = input("Is the content correct? (y/N)")
         return content
 
 
@@ -209,7 +211,7 @@ class SequenceNode:
     ):
         """Get the success/failure status of the `nodes` in achieving the `goal`."""
         prompt = open(prompt_path).read() + "\n\nGoal: " + self.goal
-        print("Status Prompt: ", prompt)
+        # print("Status Prompt: ", prompt)
         content = get_nodes_content_for_status(self.nodes, add_state=True)
         response = call_llm(prompt=prompt, content=content)
         self.status_reason = response
@@ -265,14 +267,14 @@ def get_nodes_content_for_status(
         if isinstance(n, ActionNode): text = n.action
         else: text = n.get_semantic_repr() + f' (status: {n.status.value})'
         content.append({"type": "text", "text": text})
-        print("[TEXT]", text)
+        # print("[TEXT]", text)
 
         if add_state:
             if isinstance(n, ActionNode): sn = n
             else: sn = get_last_action(n)
             image_path = sn.state.get_state()
             if image_path is not None:
-                print("[STATE IMAGE]", image_path)
+                # print("[STATE IMAGE]", image_path)
                 image_url = encode_image(image_path, return_url=True)
                 content.append({"type": "image_url", "image_url": {"url": image_url}})
     return content
@@ -298,7 +300,7 @@ def parse_chunk(chunk: str) -> dict:
 	s = chunk.index('[')
 	e = chunk.index(']', s+1)
 	text = chunk[e+1:].strip()
-	print(chunk[s+1:e])
+	# print(chunk[s+1:e])
 	if '-' not in chunk[s+1:e]:
 		s, e = chunk[s+1:e], chunk[s+1:e]
 	else:
@@ -308,7 +310,7 @@ def parse_chunk(chunk: str) -> dict:
 
 def parse_annotation(annotation: str, verbose: bool = False) -> list[dict]:
     """Parse the sub-node info (start, end, length, goal) from the LLM response."""
-    if verbose: print("Annotation: ", annotation)
+    # if verbose: print("Annotation: ", annotation)
     index = annotation.find('[')
     chunks = [s.strip() for s in annotation[index:].split('\n') if s.strip()]
     chunks = [c for c in chunks if c.startswith('[')]
@@ -318,7 +320,8 @@ def parse_annotation(annotation: str, verbose: bool = False) -> list[dict]:
             cp = parse_chunk(c)
             parsed_chunks.append(cp)
         except: 
-            print(f"Failed to parse chunk: {c}")
+            # print(f"Failed to parse chunk: {c}")
+            pass
     return parsed_chunks
 
 
@@ -337,15 +340,15 @@ def remove_empty_chunks(chunks: list[dict], node_list: list[ActionNode]) -> list
             chunks[i]["length"] = len(actions)
     if chunk_index is not None:
         chunks = chunks[:chunk_index]
-        print(f"Removed chunk {chunk_index} because it has no steps.")
+        # print(f"Removed chunk {chunk_index} because it has no steps.")
     return chunks
 
 def validate_chunks(chunks: list[dict], node_list: list[ActionNode]) -> list[dict]:
     """Validate the chunks contain the same number of ActionNodes."""
     chunks = remove_empty_chunks(chunks, node_list)
-    print("Non-Empty Chunks: ", chunks)
+    # print("Non-Empty Chunks: ", chunks)
     total_steps = sum([c["length"] for c in chunks])
-    print(f"Total Chunk Steps: {total_steps} vs Trajectory Length:{len(node_list)}")
+    # print(f"Total Chunk Steps: {total_steps} vs Trajectory Length:{len(node_list)}")
     if total_steps < len(node_list): # add the remaining steps to the last chunk
         if len(chunks) == 0:
             chunks.append({"start": 0, "end": len(node_list) - 1, "length": len(node_list), "goal": None})
@@ -353,8 +356,8 @@ def validate_chunks(chunks: list[dict], node_list: list[ActionNode]) -> list[dic
             chunks[-1]["end"] = len(node_list) - 1
             chunks[-1]["length"] = len(node_list) - chunks[-1]["start"]
         total_steps = sum([c["length"] for c in chunks])
-        if total_steps != len(node_list):
-            print(f"[WARNING] Total Chunk Steps: {chunks} vs Trajectory Length:{len(node_list)}")
+        # if total_steps != len(node_list):
+        #     print(f"[WARNING] Total Chunk Steps: {chunks} vs Trajectory Length:{len(node_list)}")
     return chunks
 
 # %% Input Node to LLM
@@ -366,8 +369,8 @@ def get_content_for_action_node_sequence(
     """Get the content of the sequence as text for goal summarization."""
     content = []
     for i, n in enumerate(node_list):
-        assert isinstance(n, ActionNode)
-        n_content = n.get_llm_input(add_state=i==len(node_list)-1 and add_state)
+        assert isinstance(n, ActionNode), f"Node is not ActionNode: {type(n)} {n}"
+        n_content = n.get_llm_input(add_state=((i==len(node_list)-1) and add_state))
         content.extend(n_content)
     return content
 
@@ -376,7 +379,7 @@ def annotate_high_level_nodes(
     node: SequenceNode,
     prompt_path: str = "prompts/annotate_node.txt",
     bucket_size: int = 10,
-    verbose: bool = True,
+    verbose: bool = False,
 ):
     """Annotated the highest-level `SequenceNode`."""
     prompt = open(prompt_path).read()
@@ -390,37 +393,41 @@ def annotate_high_level_nodes(
     new_nodes = []
     for i in range(num_buckets):
         nodes = node.nodes[i*bucket_size:(i+1)*bucket_size]
-        print(f"Bucket {i} with {len(nodes)} nodes...")
+        # print(f"Bucket {i} with {len(nodes)} nodes...")
         content = get_content_for_action_node_sequence(nodes, add_state=True)
+        # print("Prompt: ", prompt)
+        # print("Content: ", content[: -1])
+        # cont = input("Proceed with LLM call? (y/N)")
         response = call_llm(prompt=prompt, content=content)
+        # print("LLM Response: ", response)
         chunks = parse_annotation(response, nodes)
         while chunks is None:
-            print("Failed to parse annotation. Please try again.")
+            # print("Failed to parse annotation. Please try again.")
             response = call_llm(prompt=prompt, content=content)
             chunks = parse_annotation(response, nodes)
         chunks = validate_chunks(chunks, nodes)
-        print("Validated Chunks: ", chunks)
+        # print("Validated Chunks: ", chunks)
         
         for c in chunks:
             new_node = get_new_node(nodes[c["start"]:c["end"]+1])
             new_node.goal = c["goal"]
             if new_node.node_type == NodeType.SEQUENCE:
                 new_node.get_status()
-            print("New Node | Goal: ", new_node.goal, " |  Status: ", new_node.status)
+            # print("New Node | Goal: ", new_node.goal, " |  Status: ", new_node.status)
             new_nodes.append(new_node)
         if verbose: print(f"Bucket {i} done: {len(new_nodes)} new nodes..")
 
     if len(new_nodes) == 1:
         node = new_nodes[0]
-        print("Replace Original Node: Goal: ", node.goal, " |  Status: ", node.status)
+        # print("Replace Original Node: Goal: ", node.goal, " |  Status: ", node.status)
     else:
         node.nodes = new_nodes
-        print(f"Expanding to {len(node.nodes)} new child nodes.")
+        # print(f"Expanding to {len(node.nodes)} new child nodes.")
 
         # update the goal and status
         node.get_goal()
         node.get_status()
-        print("High-Level Node: Goal: ", node.goal, " |  Status: ", node.status)
+        # print("High-Level Node: Goal: ", node.goal, " |  Status: ", node.status)
 
     return node
 
