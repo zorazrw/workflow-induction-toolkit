@@ -47,7 +47,6 @@ Run the recording tool by simply running:
 crec   # Press `Ctrl+C` to stop the recording.
 ```
 
-
 ## ③ Induce Human Workflows
 
 ```bash
@@ -76,6 +75,16 @@ where `--auto` is used to automatically iterate and terminate workflow induction
 
 The workflow will be saved in the `{data_dir}/workflow.json` as a JSON file.
 The high-level step description will be saved in the `{data_dir}/workflow.txt` as plain texts.
+
+### Real-time Induction
+
+You can also induce workflows in real-time while recording. After launching the recording tool, run:
+
+```bash
+python induce_real_time.py --data_dir <data_dir>
+```
+
+You will see real-time workflow updates in the console.
 
 ## Acknowledgement
 
