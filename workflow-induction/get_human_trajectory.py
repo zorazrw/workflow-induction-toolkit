@@ -289,7 +289,7 @@ def main():
 	first_idx = 0
 	for i, (a, s, t) in enumerate(zip(actions, states, time_list)):
 		if s["before"] is not None and s["after"] is not None:
-			if states[i+1]["before"] is None or states[i+1]["after"] is None:
+			if i+1 < len(states) and (states[i+1]["before"] is None or states[i+1]["after"] is None):
 				first_idx = i
 				break
 	actions = actions[first_idx:]
